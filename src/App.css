@@ -1,0 +1,73 @@
+/* src/App.css */
+
+/* Make sure your .App styles are defined above, like this: */
+.App {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  width: 100%;
+  box-sizing: border-box;
+  /* Remove padding from .App if you want banner edge-to-edge */
+  /* padding: 20px; */ /* Comment out or remove this line */
+  text-align: center;
+  /* Ensure background color propagates if needed, or rely on body */
+  /* background-color: #f0f0f0; */ /* Example background for content area if needed */
+}
+
+/* --- MODIFY App-header --- */
+.App-header {
+  width: 100%;
+  max-width: 1000px; /* Optional max-width for nav content */
+  padding: 20px 0;
+  /* margin-bottom: 40px; */ /* <<< REMOVE or comment out this line */
+  border-bottom: 1px solid #ccc;
+  box-sizing: border-box;
+  z-index: 1; /* Ensure header stays above banner if needed */
+  position: relative; /* Needed for z-index */
+}
+
+/* --- ADD Styles for the intro banner --- */
+.intro-banner {
+  width: 100vw; /* 100% of the viewport width */
+  position: relative; /* Required for left/transform positioning */
+  left: 50%; /* Move the element's left edge to the center */
+  transform: translateX(-50%); /* Pull the element back left by half its width */
+  box-sizing: border-box; /* Include padding in width calculation */
+
+  background-color: navy; /* Navy blue background */
+  color: white;          /* White text color for contrast */
+  padding: 50px 20px;    /* Adjust vertical (50px) and horizontal (20px) padding */
+  margin: 0;             /* Remove margin, let padding handle space */
+  /* Use padding instead of margin for spacing around banner if needed */
+  /* padding-top: 20px; */
+  /* padding-bottom: 20px; */
+
+  text-align: center;
+}
+
+/* --- ADD Style for the h1 specifically inside the banner --- */
+.intro-banner h1 {
+  margin: 0; /* Remove default H1 margins */
+  font-size: 2.5em; /* Example: Make title larger (adjust as needed) */
+}
+
+/* --- Keep/Adjust .nav-item styles --- */
+.nav-item {
+  margin: 0 15px;
+  cursor: pointer;
+  font-size: 1.1em;
+  display: inline-block;
+}
+
+/* --- Keep/Adjust App-content styles --- */
+.App-content {
+  width: 100%;
+  max-width: 1000px; /* Optional: Constrain width of main text content */
+  box-sizing: border-box;
+  padding: 40px 20px; /* Add padding for content spacing */
+  /* Add margin-top if banner padding isn't enough separation */
+  /* margin-top: 20px; */
+}
+
+/* Add any other necessary styles below */
