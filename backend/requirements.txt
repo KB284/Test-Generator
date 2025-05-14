@@ -1,0 +1,4 @@
+Flask
+python-dotenv # If you use .env files for configuration
+ollama      # If using Ollama for local LLM execution
+# requests  # If you plan to call HTTP APIs for LLMs
