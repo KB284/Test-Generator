@@ -1,105 +1,142 @@
 from flask import Flask, request, jsonify
+from werkzeug.utils import secure_filename # For securely saving filenames
 import os
+import shutil # For cleaning up directories if needed
 
-# We'll import functions from other modules as we create them
-# from file_processor import process_file_upload
-# from prompt_builder import construct_llm_prompt
-# from llm_service import get_tests_from_deepseek
+# Import our custom modules
+import file_processor
+import prompt_builder
+import llm_service
 
 app = Flask(__name__)
 
-# Configuration for file uploads
-UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads') # Creates an 'uploads' folder in the backend directory
+# Configuration
+# Assuming backend folder is at the root of Test-Generator project
+# UPLOAD_FOLDER will be Test-Generator/backend/uploads/
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # Example: 16MB upload limit
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB upload limit
+ALLOWED_EXTENSIONS = {'txt', 'py', 'js', 'java', 'cs', 'go', 'rb', 'ts', 'zip', 'jsx', 'tsx'}
+
+def allowed_file(filename):
+    return '.' in filename and \
+        filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/', methods=['GET'])
+def index():
+    print("--- Root / route HIT ---", flush=True)
+    return "Flask backend is running (ready for API calls)!"
 
 @app.route('/api/upload-and-generate', methods=['POST'])
-def handle_upload_and_generate():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part in the request"}), 400
+def upload_and_generate_tests_route():
+    print("--- Request received at /api/upload-and-generate endpoint ---", flush=True)
+    original_file_path_for_cleanup = None
 
-    uploaded_file = request.files['file']
-    upload_type = request.form.get('uploadType') # 'single' or 'zip' as sent by frontend
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file part in the request"}), 400
 
-    if uploaded_file.filename == '':
-        return jsonify({"error": "No file selected for upload"}), 400
+        uploaded_file = request.files['file']
+        upload_type = request.form.get('uploadType') # 'single' or 'zip' as sent by frontend
 
-    if not upload_type:
-        return jsonify({"error": "Missing 'uploadType' in form data"}), 400
+        if uploaded_file.filename == '':
+            return jsonify({"error": "No file selected for upload"}), 400
 
-    if uploaded_file:
-        try:
-            # --- Step 1: Process the uploaded file ---
-            # This function (which we'll define in file_processor.py)
-            # will save the file, extract code if it's a zip, and return
-            # the code content as a string (or list of strings/contents).
-            # code_content_or_paths = process_file_upload(uploaded_file, upload_type, app.config['UPLOAD_FOLDER'])
+        if not upload_type:
+            return jsonify({"error": "Missing 'uploadType' in form data"}), 400
 
-            # Placeholder for file processing logic:
-            # For now, let's save the file and read its content directly if it's not a zip.
-            # More robust logic will go into file_processor.py
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], uploaded_file.filename)
-            uploaded_file.save(file_path)
+        if not (uploaded_file and allowed_file(uploaded_file.filename)):
+            return jsonify({"error": "File type not allowed"}), 400
 
-            extracted_code = ""
-            if upload_type == 'single':
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    extracted_code = f.read()
-            elif upload_type == 'zip':
-                # TODO: Implement zip processing in file_processor.py
-                # For now, we'll just indicate it's a zip.
-                # In a real scenario, you'd extract, find relevant files, and get their content.
-                extracted_code = f"Placeholder for code from zip: {uploaded_file.filename}"
+        filename = secure_filename(uploaded_file.filename) # Sanitize filename
+        print(f"Processing file: {filename}, type: {upload_type}", flush=True)
 
-            # Clean up the saved file after processing
-            # os.remove(file_path) # Move this to after LLM call or handle temp files better
+        # --- Step 1: Process the uploaded file using file_processor.py ---
+        code_to_process, original_file_path_for_cleanup = file_processor.handle_and_extract_code(
+            uploaded_file,
+            upload_type,
+            app.config['UPLOAD_FOLDER'],
+            filename
+        )
 
-            if not extracted_code:
-                return jsonify({"error": "Could not extract code from the uploaded file."}), 500
+        if code_to_process is None:
+            # file_processor should handle its own cleanup if it returns None due to its internal error
+            return jsonify({"error": "Failed to process or extract code from file. Check file_processor.py logs or file content."}), 500
 
-            # --- Step 2: Construct the prompt for DeepSeek Coder ---
-            # (Logic will be in prompt_builder.py)
-            # For now, a simple prompt:
-            # user_preferences = {"language": "python", "framework": "unittest"} # Example
-            # prompt = construct_llm_prompt(extracted_code, user_preferences)
-            prompt = f"Generate unit tests for the following code:\n\n```\n{extracted_code}\n```\n\nPlease provide only the test code."
+        if not code_to_process.strip() and upload_type == 'zip':
+            print(f"No recognized code files found in zip: {filename}")
+            if original_file_path_for_cleanup and os.path.exists(original_file_path_for_cleanup) and os.path.isdir(original_file_path_for_cleanup):
+                shutil.rmtree(original_file_path_for_cleanup)
+            return jsonify({"error": f"No recognized code files were found inside '{filename}'. Please ensure your zip contains supported file types."}), 400
 
+        print(f"Code extracted successfully. Length: {len(code_to_process)} chars.", flush=True)
+        # For debugging:
+        # print(f"Extracted code snippet: {code_to_process[:200]}...", flush=True)
 
-            # --- Step 3: Get test scripts from DeepSeek Coder ---
-            # (Logic will be in llm_service.py)
-            # generated_script = get_tests_from_deepseek(prompt)
+        # --- Step 2: Construct the prompt for DeepSeek Coder ---
+        language_preference = request.form.get("language", "python") # Default or get from user
+        framework_preference = request.form.get("framework", "unittest") # Default or from user
+        user_specific_instructions = request.form.get("instructions", None) # Optional additional instructions
 
-            # Mocking LLM response for now:
-            generated_script = f"# This is a mock test script for the provided code:\n# {extracted_code[:100]}...\n\nimport unittest\n\nclass TestMyCode(unittest.TestCase):\n    def test_example(self):\n        self.assertTrue(True)\n\nif __name__ == '__main__':\n    unittest.main()"
+        prompt = prompt_builder.construct_llm_prompt(
+            code_snippet=code_to_process,
+            language=language_preference,
+            test_framework=framework_preference,
+            user_instructions=user_specific_instructions
+        )
 
-            # Clean up the saved file now that we are done with it for this request
-            if os.path.exists(file_path):
-                os.remove(file_path)
+        # --- Step 3: Get test scripts from DeepSeek Coder ---
+        print("Sending prompt to LLM service...", flush=True)
+        generated_script = llm_service.get_tests_from_deepseek(prompt)
 
-            if not generated_script:
-                return jsonify({"error": "LLM failed to generate script."}), 500
+        # --- Cleanup after all processing is done (successful or not from LLM) ---
+        if original_file_path_for_cleanup and os.path.exists(original_file_path_for_cleanup):
+            try:
+                if os.path.isdir(original_file_path_for_cleanup): # If it was an extracted zip dir
+                    shutil.rmtree(original_file_path_for_cleanup)
+                    print(f"Cleaned up directory: {original_file_path_for_cleanup}", flush=True)
+                else: # If it was a single file
+                    os.remove(original_file_path_for_cleanup)
+                    print(f"Cleaned up file: {original_file_path_for_cleanup}", flush=True)
+            except Exception as cleanup_err:
+                app.logger.error(f"Error during cleanup of '{original_file_path_for_cleanup}': {cleanup_err}", exc_info=True)
 
-            # Respond to the frontend as expected by CreateTestScriptPage.jsx
-            return jsonify({
-                "message": "Tests generated successfully (mocked)",
-                "data": {
-                    "generated_script": generated_script,
-                    "original_filename": uploaded_file.filename
-                }
-            }), 200
+        if not generated_script:
+            return jsonify({"error": "LLM failed to generate script or returned empty. Check llm_service.py logs."}), 500
 
-        except Exception as e:
-            # Log the full error e to the console or a log file for debugging
-            print(f"Error processing file: {e}")
-            if 'file_path' in locals() and os.path.exists(file_path): # Ensure cleanup on error
-                os.remove(file_path)
-            return jsonify({"error": f"An internal error occurred: {str(e)}"}), 500
+        print("LLM script generation successful.", flush=True)
+        return jsonify({
+            "message": f"Successfully processed '{filename}' and generated tests.",
+            "data": {
+                "generated_script": generated_script,
+                "original_filename": filename,
+                "upload_type": upload_type
+                # You could also return the extracted_code_snippet if useful for frontend
+                # "extracted_code_snippet": code_to_process[:200] + "..." if len(code_to_process) > 200 else code_to_process,
+            }
+        }), 200
 
-    return jsonify({"error": "File processing failed."}), 500
+    except ValueError as ve:
+        app.logger.error(f"ValueError: {str(ve)}", exc_info=True)
+        if original_file_path_for_cleanup and os.path.exists(original_file_path_for_cleanup): # Ensure cleanup
+            try:
+                if os.path.isdir(original_file_path_for_cleanup): shutil.rmtree(original_file_path_for_cleanup)
+                else: os.remove(original_file_path_for_cleanup)
+            except Exception as cleanup_err: app.logger.error(f"Error during cleanup after ValueError: {cleanup_err}", exc_info=True)
+        return jsonify({"error": str(ve)}), 400 # Bad Request
+
+    except Exception as e:
+        app.logger.error(f"An unexpected internal server error occurred: {e}", exc_info=True)
+        if original_file_path_for_cleanup and os.path.exists(original_file_path_for_cleanup): # Ensure cleanup
+            try:
+                if os.path.isdir(original_file_path_for_cleanup): shutil.rmtree(original_file_path_for_cleanup)
+                else: os.remove(original_file_path_for_cleanup)
+            except Exception as cleanup_err: app.logger.error(f"Error during cleanup after unhandled exception: {cleanup_err}", exc_info=True)
+        return jsonify({"error": "An unexpected internal server error occurred. Please check backend logs."}), 500
 
 if __name__ == '__main__':
-    # Note: The frontend (Vite) usually runs on a different port (e.g., 5173).
-    # You might need to configure a proxy in vite.config.js for /api calls
-    # or enable CORS in Flask if running on different origins.
-    app.run(debug=True, port=5001) # Example port for the backend
+    print("--- Starting Flask App on port 5001 ---")
+    # Use host='0.0.0.0' if you want to access it from other devices on your network
+    # For local Vite proxy, '127.0.0.1' is fine.
+    app.run(host='127.0.0.1', port=5001, debug=True)
