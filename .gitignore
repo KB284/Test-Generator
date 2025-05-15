@@ -1,24 +1,72 @@
-# Logs
-logs
+# General
+.DS_Store
+Thumbs.db
 *.log
+*.swo
+*.swp
+
+# Node / Vite / React
+node_modules/
+dist/
+coverage/
+.vite/
+.env
+.env.local
+.env.*.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Python / Flask
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.sqlite3
+*.db
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# Python Virtual Environments
+# Common names for virtual environments. Adjust if you use a different name or location.
+venv/
+.venv/
+env/
+ENV/
+*_env/
+*_venv/
+
+# Specific to your backend structure if venv is inside 'backend'
+backend/venv/
+backend/.venv/
+
+# Backend specific
+backend/uploads/  # To ignore uploaded files
+backend/.env      # If you create a .env file specifically for the backend
+
+# Python distribution / packaging (less relevant for this project now, but good practice)
+# build/ # Be careful if your frontend or other tools also use a 'build' folder you *do* want to track
+# dist/  # Already covered by Node section, but if Python created a different dist
+# downloads/
+# eggs/
+# wheels/
+# MANIFEST
+
+# Test outputs
+.pytest_cache/
+htmlcov/
+.tox/
+
+# IntelliJ IDEA
+# User-specific settings that should generally not be committed.
+# Some teams commit .idea/runConfigurations/ or .idea/codeStyles/ if they are shared.
+# For a more restrictive approach initially:
+.idea/workspace.xml
+.idea/shelf/
+.idea/modules.xml # Can be problematic if project structure differs for collaborators
+*.iml             # Module files, same consideration as modules.xml
+# If you want to ignore the entire .idea folder (more aggressive, might lose shared run configs/settings):
+# .idea/
+
+# Other
+# Add any other specific files or directories you want to ignore
