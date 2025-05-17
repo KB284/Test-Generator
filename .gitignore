@@ -68,5 +68,8 @@ htmlcov/
 # If you want to ignore the entire .idea folder (more aggressive, might lose shared run configs/settings):
 # .idea/
 
+# Temporary User Uploads (if moved outside backend)
+temp_user_uploads/
+
 # Other
 # Add any other specific files or directories you want to ignore
