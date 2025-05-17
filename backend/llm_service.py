@@ -3,27 +3,41 @@ import os
 import re # For more robust response parsing
 
 # --- Configuration ---
-# You can set the DEEPSEEK_MODEL_TAG as an environment variable
-# or default to a common tag.
-# Make sure you have pulled this model with Ollama (e.g., `ollama pull deepseek-coder:6.7b-instruct`)
-DEEPSEEK_MODEL_TAG = os.environ.get('DEEPSEEK_MODEL_TAG', 'deepseek-coder:6.7b-instruct') # A common instruct-tuned model
+DEEPSEEK_MODEL_TAG = os.environ.get('DEEPSEEK_MODEL_TAG', 'deepseek-coder:6.7b-instruct')
+
+# --- Helper function to clean LLM artifacts ---
+def _clean_llm_artifacts(text: str) -> str:
+    """Removes known LLM artifacts from the text, focusing on <｜...｜> style tags."""
+    if not text:
+        return ""
+
+    cleaned_text = text
+
+    # This more general pattern aims to remove any tags of the form <｜...｜>
+    # It matches:
+    # - Literal "<｜"
+    # - Followed by any characters that are NOT a pipe, zero or more times, non-greedily ([^｜]*?)
+    #   (Using [^｜] to avoid issues if the content inside the tag itself has > or < )
+    # - Followed by literal "｜>"
+    # Using re.escape for the literal parts of the delimiter is safest.
+    tag_pattern = re.compile(re.escape("<｜") + r"[^｜]*?" + re.escape("｜>"))
+
+    cleaned_text = tag_pattern.sub("", cleaned_text)
+
+    # You can add other specific string replacements here if needed for other artifact types
+    # For example:
+    # cleaned_text = cleaned_text.replace("SOME_OTHER_UNWANTED_BOILERPLATE", "")
+    return cleaned_text.strip() # Remove leading/trailing whitespace from the final result
 
 # --- Main Service Function ---
 def get_tests_from_deepseek(prompt_text: str) -> str | None:
     """
     Sends a prompt to the configured DeepSeek Coder model via Ollama
     and attempts to return the cleaned-up code generation.
-
-    Args:
-        prompt_text: The full prompt to send to the LLM.
-
-    Returns:
-        A string containing the generated test script, or None if an error occurs
-        or if the response is empty.
     """
     print(f"Sending prompt to DeepSeek Coder (Model: {DEEPSEEK_MODEL_TAG})...")
-    # For debugging, print the prompt:
-    # print(f"--- PROMPT --- \n{prompt_text}\n--- END PROMPT ---")
+    # For debugging the prompt sent to the LLM:
+    # print(f"--- PROMPT SENT TO LLM --- \n{prompt_text}\n--- END PROMPT ---")
 
     try:
         response = ollama.chat(
@@ -33,105 +47,78 @@ def get_tests_from_deepseek(prompt_text: str) -> str | None:
                     'role': 'user',
                     'content': prompt_text,
                 }
-            ],
-            # You might want to experiment with options like temperature for creativity,
-            # but default is often fine for code generation.
-            # options={
-            #     'temperature': 0.5,
-            # }
+            ]
+            # options={ 'temperature': 0.3 } # Example: Lower temperature for more deterministic code
         )
 
         raw_response_content = response.get('message', {}).get('content', '')
+        # For debugging the raw response from LLM:
         # print(f"--- RAW LLM RESPONSE --- \n{raw_response_content}\n--- END RAW RESPONSE ---")
 
         if not raw_response_content.strip():
             print("LLM returned an empty response.")
             return None
 
-        # Attempt to extract code from markdown code blocks
+        # Step 1: Extract content from markdown code blocks if present
         # This regex looks for content between ``` optionally followed by a language hint and then ```
-        # It's non-greedy for the content inside (.*?)
         code_block_match = re.search(r"```(?:[a-zA-Z0-9_]+)?\n(.*?)\n```", raw_response_content, re.DOTALL)
 
+        content_to_clean = ""
         if code_block_match:
             extracted_code = code_block_match.group(1).strip()
-            print("Extracted code block from LLM response.")
-            return extracted_code
+            print("Extracted content from markdown code block.")
+            content_to_clean = extracted_code
         else:
-            # If no markdown block is found, return the whole response, stripped.
-            # This might happen if the LLM doesn't use markdown, or if the prompt
-            # successfully instructs it to only output code.
-            print("No markdown code block found, returning stripped raw response.")
-            return raw_response_content.strip()
+            print("No markdown code block found, using stripped raw response for cleaning.")
+            content_to_clean = raw_response_content.strip()
+
+        # Step 2: Clean known LLM artifacts from the extracted/raw content
+        final_cleaned_code = _clean_llm_artifacts(content_to_clean)
+
+        # print(f"--- CLEANED LLM RESPONSE (to be returned) --- \n{final_cleaned_code}\n--- END CLEANED RESPONSE ---")
+
+        return final_cleaned_code if final_cleaned_code else None # Avoid returning empty string if all was cleaned
 
     except Exception as e:
-        # In a production app, you'd want more sophisticated logging and error handling.
         print(f"Error communicating with Ollama or processing DeepSeek Coder response: {e}")
+        # Consider logging the full traceback here in a real app: app.logger.error(..., exc_info=True)
         return None
 
-# --- Placeholder for API-based interaction (if you switch later) ---
-# DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
-# DEEPSEEK_API_URL = "YOUR_DEEPSEEK_API_ENDPOINT_HERE"
+    # --- Simple Test Block ---
+if __name__ == '__main__':
+    print("Testing llm_service.py's _clean_llm_artifacts function...")
+    test_text_with_artifact_1 = "def test_method(self, mocked<｜begin of sentence｜>):"
+    test_text_with_artifact_2 = "Some text <｜some_other_tag｜> and more."
+    test_text_no_artifact = "def clean_method(self, arg):"
 
-# def get_tests_from_deepseek_api(prompt_text: str) -> str | None:
-#     """
-#     Placeholder function for interacting with a hosted DeepSeek API.
-#     """
-#     if not DEEPSEEK_API_KEY:
-#         print("Error: DEEPSEEK_API_KEY not configured.")
-#         return None
-#
-#     headers = {
-#         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-#         "Content-Type": "application/json"
-#     }
-#     payload = {
-#         "model": "model_name_for_api", # Specific model name for the API
-#         "messages": [{"role": "user", "content": prompt_text}],
-#         # Add other API-specific parameters here
-#     }
-#
-#     try:
-#         # import requests # Would need 'requests' library: pip install requests
-#         # response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload)
-#         # response.raise_for_status() # Raise an exception for bad status codes
-#         # api_response_data = response.json()
-#         # generated_text = api_response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
-#         # return generated_text.strip() # Add similar code extraction as above
-#         print("API interaction not yet implemented.")
-#         return "API response placeholder"
-#     except Exception as e:
-#         print(f"Error with DeepSeek API: {e}")
-#         return None
+    print(f"\nOriginal 1: '{test_text_with_artifact_1}'")
+    print(f"Cleaned 1  : '{_clean_llm_artifacts(test_text_with_artifact_1)}'")
 
-# --- Simple Test Block ---
+    print(f"\nOriginal 2: '{test_text_with_artifact_2}'")
+    print(f"Cleaned 2  : '{_clean_llm_artifacts(test_text_with_artifact_2)}'")
+
+    print(f"\nOriginal 3: '{test_text_no_artifact}'")
+    print(f"Cleaned 3  : '{_clean_llm_artifacts(test_text_no_artifact)}'")
+
+
+# --- Simple Test Block (can be kept for direct testing of this module) ---
 if __name__ == '__main__':
     print("Testing llm_service.py...")
-
-    # Ensure Ollama is running and the model is pulled:
-    # `ollama pull deepseek-coder:6.7b-instruct` (or your chosen DEEPSEEK_MODEL_TAG)
-
-    # Example prompt (you'll build more sophisticated ones in prompt_builder.py)
-    test_code_snippet = """
-def add(x, y):
-    return x + y
-
-def subtract(x, y):
-    return x - y
-"""
-    # A simple prompt, assuming prompt_builder.py will create more detailed ones
+    test_code_snippet = "def example_func(x):\n    return x * 2"
     example_prompt = (
-        f"Generate Python unittest cases for the following code. "
-        f"Ensure you cover addition and subtraction with positive and negative numbers. "
-        f"Only output the Python test code.\n\n"
+        f"Generate Python unittest cases for the following code. Only output the Python test code.\n\n"
         f"```python\n{test_code_snippet}\n```"
     )
+    # Example of text with an artifact for testing the cleaner
+    test_text_with_artifact = "def hello():\n    print(\"Hello<｜begin of sentence｜> World!\")"
+    print(f"\nOriginal text with artifact: '{test_text_with_artifact}'")
+    print(f"Cleaned text: '{_clean_llm_artifacts(test_text_with_artifact)}'")
 
+    print("\nAttempting to call actual LLM (ensure Ollama is running and model is pulled):")
     generated_script = get_tests_from_deepseek(example_prompt)
-
     if generated_script:
-        print("\n--- Generated Test Script ---")
+        print("\n--- Generated Test Script (from LLM) ---")
         print(generated_script)
         print("--- End of Script ---")
     else:
-        print("Failed to generate test script.")
+        print("Failed to generate test script from LLM.")
